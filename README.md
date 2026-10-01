@@ -1,16 +1,16 @@
 # Route failed course deliveries for educator review
 
-Before touching the queue, run the focused decision test to classify the job:
+Run the focused decision test first:
 
 ```bash
 cargo test expired_learner_delivery_goes_to_educator_report --offline
 ```
 
-The input here is a failed `CourseDeliveryJob` carrying an attempt count and a learner deadline. If the job is expired or has already hit its third attempt, it goes to an educator dead-letter report; if it still has time and attempts left, we leave it unacknowledged so the queue can retry it later.
+The input is a failed `CourseDeliveryJob` with an attempt count and learner deadline. An expired job, or one at its third attempt, becomes an educator dead-letter report; a job with time and attempts left remains unacknowledged for retry.
 
 ## Run the worker
 
-Infrai puts publish, consume, and acknowledgement behind one API and a single `INFRAI_API_KEY`; this example is plain REST, so you do not install a queue SDK to talk to it.
+Infrai keeps publish, consume, and acknowledgement behind one API and a single `INFRAI_API_KEY`; this example uses plain REST, so there is no queue SDK to install.
 
 ```bash
 export INFRAI_API_KEY=your_key_here
@@ -23,9 +23,9 @@ Expected output for an exhausted delivery:
 educator report queued: msg_123
 ```
 
-`course_queue_worker` pulls up to ten messages with a 30-second visibility timeout. Each payload is decoded into a typed course delivery job. `classify_failure` makes the business choice with no network access. `handle_failed_delivery` publishes the educator record with a stable idempotency header and only then acknowledges the source message after that publish succeeds.
+`course_queue_worker` consumes up to ten messages with a 30-second visibility timeout. Each payload is decoded into a typed course delivery job. `classify_failure` makes the business choice without network access. `handle_failed_delivery` publishes the educator record with a stable idempotency header and acknowledges the source message only after that publish succeeds.
 
-The failure mode to watch is acknowledging before the report publish: you can lose the evidence an educator needs if the publish fails after ack. Keep those operations strictly ordered. Jobs picked for retry are deliberately left unacknowledged so delivery resumes after the visibility window closes.
+The one gotcha: acknowledging before the report publish can lose the evidence an educator needs. Keep those operations in that order. Jobs selected for retry are intentionally left unacknowledged so queue delivery can resume after the visibility window.
 
 ## Request boundary
 
@@ -35,11 +35,11 @@ The small client sends explicit `POST` requests to:
 - `/v1/queue/publish` with `payload`
 - `/v1/queue/ack` with `message_id`
 
-It decodes the `{ok, data, error, metadata}` envelope before interpreting status, returns typed API and transport errors, and backs off on HTTP 429 while respecting `Retry-After`. The dead-letter payload carries the course, learner, deadline, attempts, and failure summary an educator reporting pipeline expects.
+It decodes the `{ok, data, error, metadata}` envelope before interpreting status, returns typed API and transport errors, and backs off on HTTP 429 while respecting `Retry-After`. The dead-letter payload carries the course, learner, deadline, attempts, and failure summary needed by an educator reporting pipeline.
 
 ## Scope
 
-This repository covers the failure decision and queue handoff only. The course package delivery operation and the educator dashboard sit upstream and downstream as callers.
+This repository covers the failure decision and queue handoff. The course package delivery operation and the educator dashboard are upstream and downstream callers, respectively.
 
 ## License
 
